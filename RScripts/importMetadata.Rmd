@@ -54,22 +54,11 @@ SCOPE_dataDictionary <- read_excel(SCOPE_dataDictionary_file,
   as.data.frame()
 
 # make a vector of interesting variables (food frequency questionnaire)
-SCOPE_variables <- c("f10_burger_1st_vst", "f10_burger_1m_prepreg", "f19_burger_2nd_vst","f19_curry_2nd_vst",
-                     "f10_curry_1st_vst", "f10_curry_1m_prepreg", "f19_fried_chicken_2nd_vst", "f10_fried_chicken_1st_vst",
-                     "f10_fried_chicken_1m_prepreg", "f19_fruit_2nd_vst", "f10_fruit_1st_vst", "f10_fruit_1m_prepreg",
-                     "f19_leafy_vege_2nd_vst", "f10_leafy_vege_1st_vst", "f10_leafy_vege_1m_prepreg",
-                     "f19_chips_2nd_vst", "f10_chips_1st_vst", "f10_chips_1m_prepreg", "f19_oily_fish_2nd_vst",
-                     "f10_oily_fish_1st_vst", "f10_oily_fish_1m_prepreg", "f19_oth_fish_2nd_vst", "f10_oth_fish_1st_vst",
-                     "f10_oth_fish_1m_prepreg", "f19_pizza_2nd_vst", "f10_pizza_1st_vst", "f10_pizza_1m_prepreg",
-                     "f10_multivit_1st_vst", "f19_multivit_2nd_vst", "f10_multivit_1st_trim", "f10_multivit_prepreg",
-                     "f10c_burger_1st_vst", "f10c_burger_1m_prepreg", "f19c_burger_2nd_vst", "f19c_curry_2nd_vst",
-                     "f10c_curry_1st_vst", "f10c_curry_1m_prepreg", "f19c_fried_chicken_2nd_vst", "f10c_fried_chicken_1st_vst",
-                     "f10c_fried_chicken_1m_prepreg", "f19c_fruit_2nd_vst", "f10c_fruit_1st_vst", "f10c_fruit_1st_vst_4gp",
-                     "f10c_fruit_1m_prepreg", "f19c_leafy_vege_2nd_vst", "f10c_leafy_vege_1st_vst", "f10c_leafy_vege_1m_prepreg",
-                     "f19c_chips_2nd_vst", "f10c_chips_1st_vst", "f10c_chips_1m_prepreg", "f19c_oily_fish_2nd_vst",
-                     "f10c_oily_fish_1st_vst", "f10c_oily_fish_1m_prepreg", "f19c_oth_fish_2nd_vst", "f10c_oth_fish_1st_vst",
-                     "f10c_oth_fish_1m_prepreg", "f19c_pizza_2nd_vst", "f10c_pizza_1st_vst", "f10c_pizza_1m_prepreg")
+SCOPE_variables <- c("f11_wgt", "f11_bmi", "f11_hgt", "f11_waist", "f11_hip", "f26_Sex", "f1_age", "f39c_final_del_gest", "f26_Birthwgt",  "f10_burger_1st_vst", "f10_burger_1m_prepreg", "f19_burger_2nd_vst","f19_curry_2nd_vst", "f10_curry_1st_vst", "f10_curry_1m_prepreg", "f19_fried_chicken_2nd_vst", "f10_fried_chicken_1st_vst", "f10_fried_chicken_1m_prepreg", "f19_fruit_2nd_vst", "f10_fruit_1st_vst", "f10_fruit_1m_prepreg", "f19_leafy_vege_2nd_vst", "f10_leafy_vege_1st_vst", "f10_leafy_vege_1m_prepreg", "f19_chips_2nd_vst", "f10_chips_1st_vst", "f10_chips_1m_prepreg", "f19_oily_fish_2nd_vst", "f10_oily_fish_1st_vst", "f10_oily_fish_1m_prepreg", "f19_oth_fish_2nd_vst", "f10_oth_fish_1st_vst", "f10_oth_fish_1m_prepreg", "f19_pizza_2nd_vst", "f10_pizza_1st_vst", "f10_pizza_1m_prepreg", "f10_multivit_1st_vst", "f19_multivit_2nd_vst", "f10_multivit_1st_trim", "f10_multivit_prepreg", "f10c_burger_1st_vst", "f10c_burger_1m_prepreg", "f19c_burger_2nd_vst", "f19c_curry_2nd_vst", "f10c_curry_1st_vst", "f10c_curry_1m_prepreg", "f19c_fried_chicken_2nd_vst", "f10c_fried_chicken_1st_vst", "f10c_fried_chicken_1m_prepreg", "f19c_fruit_2nd_vst", "f10c_fruit_1st_vst", "f10c_fruit_1st_vst_4gp", "f10c_fruit_1m_prepreg", "f19c_leafy_vege_2nd_vst", "f10c_leafy_vege_1st_vst", "f10c_leafy_vege_1m_prepreg", "f19c_chips_2nd_vst", "f10c_chips_1st_vst", "f10c_chips_1m_prepreg", "f19c_oily_fish_2nd_vst", "f10c_oily_fish_1st_vst", "f10c_oily_fish_1m_prepreg", "f19c_oth_fish_2nd_vst", "f10c_oth_fish_1st_vst", "f10c_oth_fish_1m_prepreg", "f19c_pizza_2nd_vst", "f10c_pizza_1st_vst", "f10c_pizza_1m_prepreg")
 
+# subset the SCOPE data dictionary so I don't have to keep scrolling for the variable explanations
+subsetSCOPE_dataDict <- dplyr::filter(SCOPE_dataDictionary, Variable_SAS_name %in% SCOPE_variables) %>%
+  dplyr::select(., Variable_SAS_name, "Variable Explanation\r\n", `Database Categories`)
 
 # subset to the required columns
 subsetSCOPE <- dplyr::select(SCOPE_raw, regid, centre, all_of(SCOPE_variables)) %>% 
@@ -90,52 +79,14 @@ dim(subsetSCOPE)
 SCOPE_plasma <- c("SCP1220", "SCP1328","SCP1413", "SCP1414", "SCP1420", "SCP1421", "SCP1724", "SCP3412", "SCP3492", "SCP3580", "SCP3628", "SCP3637", "SCP3660", "SCP3738", "SCP3780", "SCP3825", "SCP3843", "SCP3847", "SCP3852", "SCP3872", "SCP3875", "SCP3877", "SCP3928", "SCP3929", "SCP3938", "SCP3940", "SCP3954", "SCP3962", "SCP3992", "SCP4010", "SCP4041", "SCP4059", "SCP4060", "SCP4073", "SCP4139", "SCP4148", "SCP4154", "SCP4157", "SCP4164", "SCP4177", "SCP4195", "SCP4196", "SCP4319", "SCP4378", "SCP4536", "SCP4538", "SCP4565", "SCP4578", "SCP4706", "SCP4726", "SCP4733", "SCP4748", "SCP4809", "SCP4913")
 
 # filter the metadata to only inlcude SCOPE samples with plasma miRNA
-
 subsetSCOPE %<>% dplyr::filter(., samplename %in% SCOPE_plasma)
 
-subsetSCOPE %<>% dplyr::mutate(., WHR = f11_waist/f11_hip) %>% 
-  dplyr::mutate(., WHR_cat = ifelse(WHR <= 0.8, "Low",
-                                    ifelse(WHR > .80 & WHR <= .85, 
-                                           "Moderate", "High"))
-                )
-subsetSCOPE %<>% dplyr::mutate(., HiWR = f11_hgt/f11_waist)
-
-# convert date as factor to date format and save
-deliveryDate_SCOPE <- subsetSCOPE %>%
-  dplyr::mutate(deliveryDate = as.Date(as.character(f26_Baby_DOB), format = "%d/%m/%Y")) %>%
-  dplyr::select(., samplename, f26_Baby_DOB, deliveryDate)
 
 ```
 
 # Import STOP
 
 ```{r import STOP}
-
-# variables I want
-STOP_variables <- c("participant_id", "f1_age",
-                     "f5_pco", "f5_pco_conception",
-                     "f5_bwgt","f5_partner_bwgt",
-                     "f6_mother_misc", "f6_sister_misc",
-                     "f6_mother_pih", "f6_sister_pih",
-                     "f6_mother_pe", "f6_mother_ihd", 
-                     "f6_father_ihd",
-                     "f7_anaemia_yr",  "f7_anaemia_med",
-                     "f9_wgt", "f9_bmi",
-                     "f9_hgt", "f9_waist",
-                     "f9_hip", "f9_sbp", 
-                     "f9_dbp", "uscom1a_12w_map2",
-                     "f9_blood_date_hb", "f9_haematocrit",
-                     "f9_platelets", "f9_ferritin",
-                     "f9_blood_date_ferritin", "f9_prot_creat_ratio",
-                     "f9_blood_date_prot", "f9_hb",
-                     "f11_age", "f11_cig_1st_trim",
-                     "f13_glucose_booking", "f13_glucose_gestw", 
-                     "f22_sex", "f22_gestw_del",
-                     "f22_birthwgt", "f22_dob",
-                     "f29_doppler", "f29_doppler_2", 
-                     "f29_dopp_1_umbri", "f29_dopp_2_umbri")
-
-STOP_bloodPressure <- c("participant_id", "f9_sbp", "f9_dbp")
 
 # STOP (REDCap import)
 STOP_raw_dat <- read.csv("/media/sf_D_DRIVE/VM_Projects/dataFolder/STOPStudy_DATA_2021-04-23_1151.csv",
@@ -147,8 +98,13 @@ STOP_raw_dict <- read.csv(file.path("/media/sf_D_DRIVE/VM_Projects/dataFolder/ST
 STOP_raw <- apply_data_dict(STOP_raw_dat,STOP_raw_dict)
 table(STOP_raw$final_data) #use final data subset (N=1300) only
 
+# variables I want
+STOP_variables <- c("participant_id", "f1_age", "f9_wgt", "f9_bmi", "f9_hgt", "f9_waist", "f9_hip", "f11_age", "f22_sex", "f22_gestw_del", "f22_birthwgt", "f8_burgers_1st_trim", "f8_burgers_prepreg", "f8_curry_1st_trim", "f8_curry_prepreg", "f8_chicken_1st_trim", "f8_chicken_prepreg", "f8_fruit_1st_trim", "f8_fruit_prepreg", "f8_leafy_vege_1st_trim", "f8_leafy_vege_prepreg", "f8_chips_1st_trim", "f8_chips_prepreg", "f8_oily_fish_1st_trim", "f8_oily_fish_prepreg", "f8_oth_fish_1st_trim", "f8_oth_fish_prepreg", "f8_pizza_1st_trim", "f8_pizza_prepreg")
+
+
+
 # subset for the variables we want
-subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_bloodPressure)) %>%
+subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_variables)) %>%
   # drop samples not in the final data subset
   dplyr::filter(., final_data == "Yes") %>% 
   # sort by ID
@@ -160,23 +116,9 @@ subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_bloodPressure)) %>
   # make samplename the first column
   dplyr::select(., samplename, everything())
 
-# readr::write_csv(as.data.frame(subsetSTOP), "/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/rawData/STOP_bloodPressure.csv")
+# STOP samples with miRNA plasma
+STOP_plasma <- c("STP0016", "STP0023", "STP0105", "STP0148", "STP0230", "STP0275", "STP0282", "STP0378", "STP0582", "STP0583", "STP0593", "STP0596", "STP0636", "STP0677", "STP0692", "STP0761", "STP0788", "STP0795", "STP0798", "STP0852", "STP0867", "STP0888", "STP0903", "STP0912", "STP0932", "STP0944", "STP1002", "STP1082", "STP1087", "STP1206")
 
-# lets add some new columns
-# 1. waist to hip ratio
-
-subsetSTOP %<>% dplyr::mutate(., WHR = f9_waist/f9_hip) %>% 
-  dplyr::mutate(., WHR_cat = ifelse(WHR <= 0.8, "Low",
-                                    ifelse(WHR > .80 & WHR <= .85, 
-                                           "Moderate", "High"))
-                )
-# convert STOP height to m
-subsetSTOP$f9_hgt <- subsetSTOP$f9_hgt*100
-subsetSTOP %<>% dplyr::mutate(., HiWR = f9_hgt/f9_waist)
-
-# convert date as character to date format and save
-deliveryDate_STOP <- subsetSTOP %>%
-  dplyr::mutate(deliveryDate = as.Date(f22_dob)) %>%
-  dplyr::select(., samplename, f22_dob, deliveryDate)
-
+# filter the metadata to only inlcude STOP samples with plasma miRNA
+subsetSTOP %<>% dplyr::filter(., samplename %in% STOP_plasma)
 ```
