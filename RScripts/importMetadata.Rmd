@@ -84,6 +84,19 @@ subsetSCOPE %<>% dplyr::filter(., samplename %in% SCOPE_plasma)
 
 ```
 
+## Convert SCOPE variables to match STOP
+- Fetal sex is coded as 1/2 in SCOPE; convert to 'Male' and 'Female' to match STOP.  
+
+```{r}
+# Convert the 1/2 sex code to Male/Female
+subsetSCOPE %<>% dplyr::mutate(f26_Sex_MF = case_when(
+    f26_Sex == 1 ~ "Male",
+    f26_Sex == 2 ~ "Female"
+  ))
+
+```
+
+
 # Import STOP
 
 ```{r import STOP}
@@ -101,8 +114,6 @@ table(STOP_raw$final_data) #use final data subset (N=1300) only
 # variables I want
 STOP_variables <- c("participant_id", "f1_age", "f9_wgt", "f9_bmi", "f9_hgt", "f9_waist", "f9_hip", "f11_age", "f22_sex", "f22_gestw_del", "f22_birthwgt", "f8_burgers_1st_trim", "f8_burgers_prepreg", "f8_curry_1st_trim", "f8_curry_prepreg", "f8_chicken_1st_trim", "f8_chicken_prepreg", "f8_fruit_1st_trim", "f8_fruit_prepreg", "f8_leafy_vege_1st_trim", "f8_leafy_vege_prepreg", "f8_chips_1st_trim", "f8_chips_prepreg", "f8_oily_fish_1st_trim", "f8_oily_fish_prepreg", "f8_oth_fish_1st_trim", "f8_oth_fish_prepreg", "f8_pizza_1st_trim", "f8_pizza_prepreg")
 
-
-
 # subset for the variables we want
 subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_variables)) %>%
   # drop samples not in the final data subset
@@ -113,6 +124,8 @@ subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_variables)) %>%
   dplyr::mutate(., samplename = paste0(
     "STP", stringr::str_pad(participant_id, width = 4, pad = "0"))
     ) %>%
+  # ensure fetal sex is a character
+  dplyr::mutate(f22_sex = as.character(f22_sex)) %>%
   # make samplename the first column
   dplyr::select(., samplename, everything())
 
@@ -122,3 +135,57 @@ STOP_plasma <- c("STP0016", "STP0023", "STP0105", "STP0148", "STP0230", "STP0275
 # filter the metadata to only inlcude STOP samples with plasma miRNA
 subsetSTOP %<>% dplyr::filter(., samplename %in% STOP_plasma)
 ```
+
+## Convert STOP variables to match SCOPE
+- Height is measured in m. Recode to cm to match all the other measurements and SCOPE.    
+
+```{r}
+# Convert the height in M to height in cm
+subsetSTOP %<>% dplyr::mutate(f9_hgt_cm = f9_hgt * 100)
+
+```
+
+# Combine SCOPE and STOP
+
+```{r combine scope and stop}
+
+combinedMetaData <- data.frame(samplename = c(subsetSCOPE[,"samplename"], subsetSTOP[,"samplename"]),
+                               cohort = c(rep("SCOPE", nrow(subsetSCOPE)), rep("STOP", nrow(subsetSTOP))),
+                               gestationDelivery = c(subsetSCOPE[,"f39c_final_del_gest"], subsetSTOP[,"f22_gestw_del"]),
+                               neonatalSex = c(subsetSCOPE[, "f26_Sex_MF"], subsetSTOP[, "f22_sex"]),
+                               neonatalBirthweight = c(subsetSCOPE[, "f26_Birthwgt"], subsetSTOP[, "f22_birthwgt"]),
+                               maternalWaist = c(subsetSCOPE[, "f11_waist"], subsetSTOP[, "f9_waist"]),
+                               maternalHip = c(subsetSCOPE[, "f11_hip"], subsetSTOP[, "f9_hip"]),
+                               maternalBMI = c(subsetSCOPE[, "f11_bmi"], subsetSTOP[, "f9_bmi"]),
+                               maternalWgt = c(subsetSCOPE[, "f11_wgt"], subsetSTOP[, "f9_wgt"]),
+                               maternalHgt = c(subsetSCOPE[, "f11_hgt"], subsetSTOP[, "f9_hgt_cm"]),
+                               maternalAge = c(subsetSCOPE[, "f1_age"], subsetSTOP[, "f1_age"]),
+                               maternalBurger_1st = c(subsetSCOPE[, "f10_burger_1st_vst"], subsetSTOP[, "f8_burgers_1st_trim"]),
+                               maternalBurger_prepreg = c(subsetSCOPE[, "f10_burger_1m_prepreg"], subsetSTOP[, "f8_burgers_prepreg"]),
+                               maternalCurry_1st = c(subsetSCOPE[, "f10_curry_1st_vst"], subsetSTOP[, "f8_curry_1st_trim"]),
+                               maternalCurry_prepreg = c(subsetSCOPE[, "f10_curry_1m_prepreg"], subsetSTOP[, "f8_curry_prepreg"]),
+                               maternalFriedChicken_1st = c(subsetSCOPE[, "f10_fried_chicken_1st_vst"], subsetSTOP[, "f8_chicken_1st_trim"]),
+                               maternalFriedChicken_prepreg = c(subsetSCOPE[, "f10_fried_chicken_1m_prepreg"], subsetSTOP[, "f8_chicken_prepreg"]),
+                               maternalFruit_1st = c(subsetSCOPE[, "f10_fruit_1st_vst"], subsetSTOP[, "f8_fruit_1st_trim"]),
+                               maternalFruit_prepreg = c(subsetSCOPE[, "f10_fruit_1m_prepreg"], subsetSTOP[, "f8_fruit_prepreg"]),
+                               materalLeafyVege_1st = c(subsetSCOPE[, "f10_leafy_vege_1st_vst"], subsetSTOP[, "f8_leafy_vege_1st_trim"]),
+                               maternalLeafyVeg_prepreg = c(subsetSCOPE[, "f10_leafy_vege_1m_prepreg"], subsetSTOP[, "f8_leafy_vege_prepreg"]),
+                               maternalChips_1st = c(subsetSCOPE[, "f10_chips_1st_vst"], subsetSTOP[, "f8_chips_1st_trim"]),
+                               maternalChips_prepreg = c(subsetSCOPE[, "f10_chips_1m_prepreg"], subsetSTOP[, "f8_chips_prepreg"]),
+                               maternalOilyFish_1st = c(subsetSCOPE[, "f10_oily_fish_1st_vst"], subsetSTOP[, "f8_oily_fish_1st_trim"]),
+                               maternalOilyFish_prepreg = c(subsetSCOPE[, "f10_oily_fish_1m_prepreg"], subsetSTOP[, "f8_oily_fish_prepreg"]),
+                               maternalOtherFish_1st = c(subsetSCOPE[, "f10_oth_fish_1st_vst"], subsetSTOP[, "f8_oth_fish_1st_trim"]),
+                               maternalOtherFish_prepreg = c(subsetSCOPE[, "f10_oth_fish_1m_prepreg"], subsetSTOP[, "f8_oth_fish_prepreg"]),
+                               maternalPizza_1st = c(subsetSCOPE[, "f10_pizza_1st_vst"], subsetSTOP[, "f8_pizza_1st_trim"]),
+                               maternalPizza_prepreg = c(subsetSCOPE[, "f10_pizza_1m_prepreg"], subsetSTOP[, "f8_pizza_prepreg"]))
+
+
+```
+
+# Add outcomes data
+- Go back to the metadata and add information regarding pregnancy outcomes.  
+```{r}
+
+temp <- dplyr::filter(metadata_quality, samplename %in% c(SCOPE_plasma, STOP_plasma))
+```
+
