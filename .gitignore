@@ -54,3 +54,9 @@ rsconnect/
 # bam files
 *.bam
 *.bam.bai
+
+# genome files
+*.fa
+*.fa.gz
+*.gtf
+*.gtf.gz
