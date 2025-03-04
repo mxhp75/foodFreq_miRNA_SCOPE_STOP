@@ -11,6 +11,8 @@ output: html_document
 library(plyr)
 library(reshape2)
 library(dplyr)
+library(tidyverse)
+library(kableExtra)  # For pretty tables
 library(stringr)
 library(edgeR)
 library(readxl)
@@ -23,7 +25,7 @@ library(pheatmap)
 
 # set project directory
 projectDir <- "/home/smit1924/foodFreq_miRNA_SCOPE_STOP"
-dataFolder <- "/home/smit1924/dataFolder"
+dataFolder <- "/media/sf_D_DRIVE/VM_Projects/dataFolder"
 
 expt_name <- 'foodFreq_miRNA_SCOPE_STOP'
 
@@ -33,12 +35,175 @@ STOP_raw_dat_file <- file.path(dataFolder,"STOPStudy_DATA_2021-04-23_1151.csv")
 STOP_raw_dict_file <- file.path(dataFolder,"STOPStudy_DataDictionary_2021-04-23.csv")
 SCOPE_STOP_BWcentile_metab_file <- file.path(dataFolder, "SCOPE_STOP_BWcentile_metab.csv")
 
+SCOPE_STOP_full <- file.path(dataFolder, "SCOPE_STOP_full_20240208.rds")
+
 outdir <- file.path(projectDir, paste0("output_", expt_name))
 
 dir.create(outdir)
 
+tertileTable_out_file <- file.path(outdir, "tertile_table.xlsx")
+quartileTable_out_file <- file.path(outdir, "quartile_table.xlsx")
+
 # REDCap import
 source("/media/sf_D_DRIVE/VM_Projects/dataFolder/redcap_api_import.R")
+
+# SCOPE samples with miRNA plasma
+SCOPE_plasma <- c("SCP1220", "SCP1328","SCP1413", "SCP1414", "SCP1420", "SCP1421", "SCP1724", "SCP3412", "SCP3492", "SCP3580", "SCP3628", "SCP3637", "SCP3660", "SCP3738", "SCP3780", "SCP3825", "SCP3843", "SCP3847", "SCP3852", "SCP3872", "SCP3875", "SCP3877", "SCP3928", "SCP3929", "SCP3938", "SCP3940", "SCP3954", "SCP3962", "SCP3992", "SCP4010", "SCP4041", "SCP4059", "SCP4060", "SCP4073", "SCP4139", "SCP4148", "SCP4154", "SCP4157", "SCP4164", "SCP4177", "SCP4195", "SCP4196", "SCP4319", "SCP4378", "SCP4536", "SCP4538", "SCP4565", "SCP4578", "SCP4706", "SCP4726", "SCP4733", "SCP4748", "SCP4809", "SCP4913")
+
+# STOP samples with miRNA plasma
+STOP_plasma <- c("STP0016", "STP0023", "STP0105", "STP0148", "STP0230", "STP0275", "STP0282", "STP0378", "STP0582", "STP0583", "STP0593", "STP0596", "STP0636", "STP0677", "STP0692", "STP0761", "STP0788", "STP0795", "STP0798", "STP0852", "STP0867", "STP0888", "STP0903", "STP0912", "STP0932", "STP0944", "STP1002", "STP1082", "STP1087", "STP1206")
+
+```
+
+## Custom functions
+
+```{r}
+# This function performs recoding of categorical data (9-levels) in STOP to match (5-levels) in SCOPE.
+# This allows for the SCOPE and STOP data to be combined
+f10c.gps <- function(x){
+  # Convert input x to a factor with levels 1 through 9
+  # This ensures all values in x are mapped to these exact levels
+  
+  # First convert to numeric representation of the factor
+  x_numeric <- as.numeric(x)
+  
+  x1 <- factor(x_numeric, 1:9)
+  
+  # Remap the original 9 levels to a new set of values:
+  # - Original level 1 becomes 2
+  # - Original level 2 becomes 3
+  # - Original level 3 becomes 4
+  # - Original level 4 becomes 4 (unchanged)
+  # - Original level 5 becomes 5
+  # - Original level 6 becomes 5
+  # - Original level 7 becomes 5
+  # - Original level 8 becomes 1
+  # - Original level 9 becomes NA (missing value)
+  levels(x1) <- c(2, 3, 4, 4, 5, 5, 5, 1, NA)
+  
+  # Convert to a factor again, but now with levels 1 through 5 only
+  # This ensures the result only contains values 1-5
+  # Any NA values remain as NA
+  x1 <- factor(x1, 1:5)
+  
+  # Return the transformed factor
+  return(x1)
+}
+
+# This function transforms categorical data into specific numeric values on a scale from 0 to 1
+# This encodes the original categories (represented as frequencies) into a meaningful numeric scale
+fastfd.fix <- function(x){
+  # Convert input to a factor
+  # This allows for categorical mapping of values
+  x <- as.factor(x)
+  
+  # Replace the factor levels with specific numeric values
+  # The values correspond to:
+  # - First level: 0
+  # - Second level: 0.1 (3/30)
+  # - Third level: 0.214 (1.5/7)
+  # - Fourth level: 0.643 (4.5/7)
+  # - Fifth level: 1
+  # These represent a non-linear scale from 0 to 1
+  levels(x) <- c(0, 3/30, 1.5/7, 4.5/7, 1)
+  
+  # Convert factor to numeric values based on the new levels
+  # as.matrix is used to ensure proper conversion
+  x <- as.numeric(as.matrix(x))
+  
+  # Return the transformed numeric vector
+  return(x)
+}
+
+# Function to count observations in each quartile for a variable
+count_by_quartile <- function(variable_name, data) {
+  # Skip if not numeric
+  if(!is.numeric(data[[variable_name]])) return(NULL)
+  
+  # Get the variable data
+  var_data <- data[[variable_name]]
+  var_data <- na.omit(var_data)  # Remove NAs
+  
+  # Calculate quartiles
+  quartiles <- quantile(var_data, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+  
+  # Count observations in each quartile
+  q1_count <- sum(var_data <= quartiles[2], na.rm = TRUE)
+  q2_count <- sum(var_data > quartiles[2] & var_data <= quartiles[3], na.rm = TRUE)
+  q3_count <- sum(var_data > quartiles[3] & var_data <= quartiles[4], na.rm = TRUE)
+  q4_count <- sum(var_data > quartiles[4], na.rm = TRUE)
+  
+  # Return results
+  data.frame(
+    Variable = variable_name,
+    Q1_threshold = quartiles[2],
+    Q2_threshold = quartiles[3],
+    Q3_threshold = quartiles[4],
+    Q4_threshold = quartiles[5],
+    Q1_count = q1_count,
+    Q2_count = q2_count,
+    Q3_count = q3_count,
+    Q4_count = q4_count,
+    Total_observations = length(var_data)
+  )
+}
+
+# Function to count observations in each tertile for a variable
+count_by_tertile <- function(variable_name, data) {
+  # Skip if not numeric
+  if (!is.numeric(data[[variable_name]])) return(NULL)
+  
+  # Get the variable data
+  var_data <- data[[variable_name]]
+  var_data <- na.omit(var_data)  # Remove NAs
+  
+  # Calculate tertiles
+  tertiles <- quantile(var_data, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE)
+  
+  # Count observations in each tertile
+  t1_count <- sum(var_data <= tertiles[2], na.rm = TRUE)
+  t2_count <- sum(var_data > tertiles[2] & var_data <= tertiles[3], na.rm = TRUE)
+  t3_count <- sum(var_data > tertiles[3], na.rm = TRUE)
+  
+  # Return results
+  data.frame(
+    Variable = variable_name,
+    T1_threshold = tertiles[2],  # 33rd percentile
+    T2_threshold = tertiles[3],  # 66th percentile
+    T3_threshold = tertiles[4],  # Max value
+    T1_count = t1_count,         # Count in 1st tertile
+    T2_count = t2_count,         # Count in 2nd tertile
+    T3_count = t3_count,         # Count in 3rd tertile
+    Total_observations = length(var_data)
+  )
+}
+
+
+```
+
+
+# Import the combined SCOPE and STOP data already processed
+- These data come from work previously completed by Shalem.  
+```{r}
+# import Shalem's combined file
+SCOPE_STOP_combined_20240208 <- readRDS(SCOPE_STOP_full) 
+
+# create a new column with a samplename that matches the rest of my data
+SCOPE_STOP_combined_20240208 <- SCOPE_STOP_combined_20240208 %>%
+  mutate(samplename = case_when(
+    Study == "SCOPE" ~ paste0("SCP", str_pad(Study.ID, width = 4, pad = "0")),
+    Study == "STOP" ~ paste0("STP", str_pad(Study.ID, width = 4, pad = "0")),
+    TRUE ~ NA_character_
+  )) %>%
+  dplyr::select(., samplename, everything())
+
+# subset the combined file to only include the samples we have miRseq plasma for
+subset_SCOPE_STOP <- subset(SCOPE_STOP_combined_20240208, samplename %in% c(SCOPE_plasma, STOP_plasma)) %>%
+  # remove the columns we aren't interested in
+  dplyr::select(., samplename, f1_age, BMI, SEI, f11_waist, GA_samp, Birthweight, Birthweight_centile, fetal_sex, GA_birth, Uncomplicated, FastFd_PrePregWK, FastFd_1stVstWK)
+
+# Add a label to the 'GA_samp' column
+attr(subset_SCOPE_STOP$GA_samp, "label") <- "Gestational age at sample collection (weeks)"
 
 ```
 
@@ -53,15 +218,33 @@ SCOPE_dataDictionary <- read_excel(SCOPE_dataDictionary_file,
                                    sheet = "Stage 1 Data") %>%
   as.data.frame()
 
-# make a vector of interesting variables (food frequency questionnaire)
-SCOPE_variables <- c("f11_wgt", "f11_bmi", "f11_hgt", "f11_waist", "f11_hip", "f26_Sex", "f1_age", "f39c_final_del_gest", "f26_Birthwgt",  "f10_burger_1st_vst", "f10_burger_1m_prepreg", "f19_burger_2nd_vst","f19_curry_2nd_vst", "f10_curry_1st_vst", "f10_curry_1m_prepreg", "f19_fried_chicken_2nd_vst", "f10_fried_chicken_1st_vst", "f10_fried_chicken_1m_prepreg", "f19_fruit_2nd_vst", "f10_fruit_1st_vst", "f10_fruit_1m_prepreg", "f19_leafy_vege_2nd_vst", "f10_leafy_vege_1st_vst", "f10_leafy_vege_1m_prepreg", "f19_chips_2nd_vst", "f10_chips_1st_vst", "f10_chips_1m_prepreg", "f19_oily_fish_2nd_vst", "f10_oily_fish_1st_vst", "f10_oily_fish_1m_prepreg", "f19_oth_fish_2nd_vst", "f10_oth_fish_1st_vst", "f10_oth_fish_1m_prepreg", "f19_pizza_2nd_vst", "f10_pizza_1st_vst", "f10_pizza_1m_prepreg", "f10_multivit_1st_vst", "f19_multivit_2nd_vst", "f10_multivit_1st_trim", "f10_multivit_prepreg", "f10c_burger_1st_vst", "f10c_burger_1m_prepreg", "f19c_burger_2nd_vst", "f19c_curry_2nd_vst", "f10c_curry_1st_vst", "f10c_curry_1m_prepreg", "f19c_fried_chicken_2nd_vst", "f10c_fried_chicken_1st_vst", "f10c_fried_chicken_1m_prepreg", "f19c_fruit_2nd_vst", "f10c_fruit_1st_vst", "f10c_fruit_1st_vst_4gp", "f10c_fruit_1m_prepreg", "f19c_leafy_vege_2nd_vst", "f10c_leafy_vege_1st_vst", "f10c_leafy_vege_1m_prepreg", "f19c_chips_2nd_vst", "f10c_chips_1st_vst", "f10c_chips_1m_prepreg", "f19c_oily_fish_2nd_vst", "f10c_oily_fish_1st_vst", "f10c_oily_fish_1m_prepreg", "f19c_oth_fish_2nd_vst", "f10c_oth_fish_1st_vst", "f10c_oth_fish_1m_prepreg", "f19c_pizza_2nd_vst", "f10c_pizza_1st_vst", "f10c_pizza_1m_prepreg")
+# # date variables for bloods and birth
+# date_variables <- c("f1_date_1st_scope_vst", "f11_serum_date", "f11_edta_plasma_date", "f20_edta_plasma_date", "f23_date_20w_scan", "f39c_final_del_gest", "f26_Baby_DOB")
+# date_SCOPE_dataDictionary <- dplyr::filter(SCOPE_dataDictionary, Variable_SAS_name %in% date_variables)%>%
+#   dplyr::select(., Variable_SAS_name, "Variable Explanation\r\n", `Database Categories`)
+# 
+# # make a vector of interesting variables (food frequency questionnaire)
+# fastFood_variables <- c("f10_burger_1st_vst", "f10_burger_1m_prepreg", "f19_burger_2nd_vst","f19_curry_2nd_vst", "f10_curry_1st_vst", "f10_curry_1m_prepreg", "f19_fried_chicken_2nd_vst", "f10_fried_chicken_1st_vst", "f10_fried_chicken_1m_prepreg", "f19_fruit_2nd_vst", "f10_fruit_1st_vst", "f10_fruit_1m_prepreg", "f19_leafy_vege_2nd_vst", "f10_leafy_vege_1st_vst", "f10_leafy_vege_1m_prepreg", "f19_chips_2nd_vst", "f10_chips_1st_vst", "f10_chips_1m_prepreg", "f19_oily_fish_2nd_vst", "f10_oily_fish_1st_vst", "f10_oily_fish_1m_prepreg", "f19_oth_fish_2nd_vst", "f10_oth_fish_1st_vst", "f10_oth_fish_1m_prepreg", "f19_pizza_2nd_vst", "f10_pizza_1st_vst", "f10_pizza_1m_prepreg", "f10_multivit_1st_vst", "f19_multivit_2nd_vst", "f10_multivit_1st_trim", "f10_multivit_prepreg", "f10c_burger_1st_vst", "f10c_burger_1m_prepreg", "f19c_burger_2nd_vst", "f19c_curry_2nd_vst", "f10c_curry_1st_vst", "f10c_curry_1m_prepreg", "f19c_fried_chicken_2nd_vst", "f10c_fried_chicken_1st_vst", "f10c_fried_chicken_1m_prepreg", "f19c_fruit_2nd_vst", "f10c_fruit_1st_vst", "f10c_fruit_1st_vst_4gp", "f10c_fruit_1m_prepreg", "f19c_leafy_vege_2nd_vst", "f10c_leafy_vege_1st_vst", "f10c_leafy_vege_1m_prepreg", "f19c_chips_2nd_vst", "f10c_chips_1st_vst", "f10c_chips_1m_prepreg", "f19c_oily_fish_2nd_vst", "f10c_oily_fish_1st_vst", "f10c_oily_fish_1m_prepreg", "f19c_oth_fish_2nd_vst", "f10c_oth_fish_1st_vst", "f10c_oth_fish_1m_prepreg", "f19c_pizza_2nd_vst", "f10c_pizza_1st_vst", "f10c_pizza_1m_prepreg")
+# 
+# fastFood_SCOPE_dataDictionary <- dplyr::filter(SCOPE_dataDictionary, Variable_SAS_name %in% fastFood_variables)%>%
+#   dplyr::select(., Variable_SAS_name, "Variable Explanation\r\n", `Database Categories`)
+# 
+# # maternal and birth variables
+# maternal_variables <- c("f11_wgt", "f11_bmi", "f11_hgt", "f11_waist", "f11_hip", "f26_Sex", "f1_age",  "f26_Birthwgt")
+# 
+# maternal_SCOPE_dataDictionary <- dplyr::filter(SCOPE_dataDictionary, Variable_SAS_name %in% maternal_variables)%>%
+#   dplyr::select(., Variable_SAS_name, "Variable Explanation\r\n", `Database Categories`)
+
+# putting together only the variables we need for Anand (not including the one's from Shalem's table)
+final_variables <- c("f10c_fruit_1st_vst", "f10c_fruit_1m_prepreg", "f10c_leafy_vege_1st_vst", "f10c_leafy_vege_1m_prepreg", "f10c_oily_fish_1st_vst", "f10c_oily_fish_1m_prepreg")
+
 
 # subset the SCOPE data dictionary so I don't have to keep scrolling for the variable explanations
-subsetSCOPE_dataDict <- dplyr::filter(SCOPE_dataDictionary, Variable_SAS_name %in% SCOPE_variables) %>%
+subsetSCOPE_dataDict <- dplyr::filter(SCOPE_dataDictionary, Variable_SAS_name %in% final_variables) %>%
   dplyr::select(., Variable_SAS_name, "Variable Explanation\r\n", `Database Categories`)
 
 # subset to the required columns
-subsetSCOPE <- dplyr::select(SCOPE_raw, regid, centre, all_of(SCOPE_variables)) %>% 
+subsetSCOPE <- dplyr::select(SCOPE_raw, regid, centre, all_of(final_variables)) %>% 
   # remove all centres except Adelaide
   dplyr::filter(., centre == "Adelaide University") %>% 
     # sort by ID
@@ -71,30 +254,70 @@ subsetSCOPE <- dplyr::select(SCOPE_raw, regid, centre, all_of(SCOPE_variables)) 
   # make samplename the first column and drop column 'centre'
   dplyr::select(., samplename, everything(), -centre) %>% 
   # replace all the missing data codes with NA
-  mutate(across(everything(), function(x){replace(x, which(x<0), NA)}))
+  mutate(across(everything(), function(x){replace(x, which(x<0), NA)})) %>%
+  dplyr::select(., -regid)
 head(subsetSCOPE)
 dim(subsetSCOPE)
-
-# SCOPE samples with miRNA plasma
-SCOPE_plasma <- c("SCP1220", "SCP1328","SCP1413", "SCP1414", "SCP1420", "SCP1421", "SCP1724", "SCP3412", "SCP3492", "SCP3580", "SCP3628", "SCP3637", "SCP3660", "SCP3738", "SCP3780", "SCP3825", "SCP3843", "SCP3847", "SCP3852", "SCP3872", "SCP3875", "SCP3877", "SCP3928", "SCP3929", "SCP3938", "SCP3940", "SCP3954", "SCP3962", "SCP3992", "SCP4010", "SCP4041", "SCP4059", "SCP4060", "SCP4073", "SCP4139", "SCP4148", "SCP4154", "SCP4157", "SCP4164", "SCP4177", "SCP4195", "SCP4196", "SCP4319", "SCP4378", "SCP4536", "SCP4538", "SCP4565", "SCP4578", "SCP4706", "SCP4726", "SCP4733", "SCP4748", "SCP4809", "SCP4913")
 
 # filter the metadata to only inlcude SCOPE samples with plasma miRNA
 subsetSCOPE %<>% dplyr::filter(., samplename %in% SCOPE_plasma)
 
-
+# # ensure R sees all the date columns as dates
+# # Load necessary libraries
+# library(dplyr)
+# library(lubridate)
+# 
+# # Get names of date columns (all columns containing "date" or "DOB" in their names)
+# date_cols <- names(subsetSCOPE)[grepl("date|DOB", names(subsetSCOPE), ignore.case = TRUE)]
+# 
+# # Convert each date column
+# subsetSCOPE_date <- subsetSCOPE %>%
+#   mutate(across(all_of(date_cols), 
+#                 ~as.Date(as.character(.), 
+#                          format = "%d/%m/%Y")))
+# 
+# # Verify the conversion worked correctly
+# str(subsetSCOPE_date[, date_cols])
 ```
 
 ## Convert SCOPE variables to match STOP
 - Fetal sex is coded as 1/2 in SCOPE; convert to 'Male' and 'Female' to match STOP.  
 
 ```{r}
-# Convert the 1/2 sex code to Male/Female
-subsetSCOPE %<>% dplyr::mutate(f26_Sex_MF = case_when(
-    f26_Sex == 1 ~ "Male",
-    f26_Sex == 2 ~ "Female"
-  ))
+# # Convert the 1/2 sex code to Male/Female
+# subsetSCOPE %<>% dplyr::mutate(f26_Sex_MF = case_when(
+#     f26_Sex == 1 ~ "Male",
+#     f26_Sex == 2 ~ "Female"
+#   ))
 
 ```
+
+- Now convert to a frequency metric 
+
+```{r}
+# use the `fastfd.fix()` function to convert the catagorical variable to a fractional variable representing serves per day
+# prepreg
+subsetSCOPE$oilyFishPrePreg <- fastfd.fix(subsetSCOPE$f10c_oily_fish_1m_prepreg)
+subsetSCOPE$fruitPrePreg <- fastfd.fix(subsetSCOPE$f10c_fruit_1m_prepreg)
+subsetSCOPE$leafyVegPrePreg <- fastfd.fix(subsetSCOPE$f10c_leafy_vege_1m_prepreg)
+
+# 1st-trim
+subsetSCOPE$oilyFish1stVisit <- fastfd.fix(subsetSCOPE$f10c_oily_fish_1st_vst)
+subsetSCOPE$fruit1stVisit <- fastfd.fix(subsetSCOPE$f10c_fruit_1st_vst)
+subsetSCOPE$leafyVeg1stVisit <- fastfd.fix(subsetSCOPE$f10c_leafy_vege_1st_vst)
+
+# multiply by 7 to calculate the serves per week
+# prepreg
+subsetSCOPE$oilyFishPrePregWK <- subsetSCOPE$oilyFishPrePreg*7
+subsetSCOPE$fruitPrePregWK <- subsetSCOPE$fruitPrePreg*7
+subsetSCOPE$leafyVegPrePregWK <- subsetSCOPE$leafyVegPrePreg*7
+
+# 1st-trim
+subsetSCOPE$oilyFish1stVisitWK <- subsetSCOPE$oilyFish1stVisit*7
+subsetSCOPE$fruit1stVisitWK <- subsetSCOPE$fruit1stVisit*7
+subsetSCOPE$leafyVeg1stVisitWK <- subsetSCOPE$leafyVeg1stVisit*7
+```
+
 
 
 # Import STOP
@@ -112,7 +335,7 @@ STOP_raw <- apply_data_dict(STOP_raw_dat,STOP_raw_dict)
 table(STOP_raw$final_data) #use final data subset (N=1300) only
 
 # variables I want
-STOP_variables <- c("participant_id", "f1_age", "f9_wgt", "f9_bmi", "f9_hgt", "f9_waist", "f9_hip", "f11_age", "f22_sex", "f22_gestw_del", "f22_birthwgt", "f8_burgers_1st_trim", "f8_burgers_prepreg", "f8_curry_1st_trim", "f8_curry_prepreg", "f8_chicken_1st_trim", "f8_chicken_prepreg", "f8_fruit_1st_trim", "f8_fruit_prepreg", "f8_leafy_vege_1st_trim", "f8_leafy_vege_prepreg", "f8_chips_1st_trim", "f8_chips_prepreg", "f8_oily_fish_1st_trim", "f8_oily_fish_prepreg", "f8_oth_fish_1st_trim", "f8_oth_fish_prepreg", "f8_pizza_1st_trim", "f8_pizza_prepreg")
+STOP_variables <- c("participant_id", "f8_fruit_1st_trim", "f8_fruit_prepreg", "f8_leafy_vege_1st_trim", "f8_leafy_vege_prepreg", "f8_oily_fish_1st_trim", "f8_oily_fish_prepreg")
 
 # subset for the variables we want
 subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_variables)) %>%
@@ -124,24 +347,70 @@ subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_variables)) %>%
   dplyr::mutate(., samplename = paste0(
     "STP", stringr::str_pad(participant_id, width = 4, pad = "0"))
     ) %>%
-  # ensure fetal sex is a character
-  dplyr::mutate(f22_sex = as.character(f22_sex)) %>%
   # make samplename the first column
-  dplyr::select(., samplename, everything())
-
-# STOP samples with miRNA plasma
-STOP_plasma <- c("STP0016", "STP0023", "STP0105", "STP0148", "STP0230", "STP0275", "STP0282", "STP0378", "STP0582", "STP0583", "STP0593", "STP0596", "STP0636", "STP0677", "STP0692", "STP0761", "STP0788", "STP0795", "STP0798", "STP0852", "STP0867", "STP0888", "STP0903", "STP0912", "STP0932", "STP0944", "STP1002", "STP1082", "STP1087", "STP1206")
+  dplyr::select(., samplename, everything()) %>%
+  dplyr::select(., -final_data, -participant_id)
 
 # filter the metadata to only inlcude STOP samples with plasma miRNA
 subsetSTOP %<>% dplyr::filter(., samplename %in% STOP_plasma)
+
+# quick double check to see the function works as expected
+temp <- data.frame(old = subsetSTOP$f8_leafy_vege_1st_trim,
+                   numeric = as.numeric(subsetSTOP$f8_leafy_vege_1st_trim),
+                   new = f10c.gps(subsetSTOP$f8_leafy_vege_1st_trim))
+
 ```
 
 ## Convert STOP variables to match SCOPE
 - Height is measured in m. Recode to cm to match all the other measurements and SCOPE.    
 
 ```{r}
-# Convert the height in M to height in cm
-subsetSTOP %<>% dplyr::mutate(f9_hgt_cm = f9_hgt * 100)
+# # Convert the height in M to height in cm
+# subsetSTOP %<>% dplyr::mutate(f9_hgt_cm = f9_hgt * 100)
+
+```
+
+- STOP variables have 9 catagorical groups, SCOPE has 5  
+- Using the `f10c.gps` funciton, recode STOP to match SCOPE f10c_ variables  
+
+```{r}
+## regroup vars
+# prepreg - I'm using the same naming convention here that Shalem used in his code
+# basically this first step (prior to fastfd.fix() converts the 9 STOP cats to match the 5 SCOPE cats so I use the SCOPE "f10C_" name
+subsetSTOP$f10c_oily_fish_1m_prepreg <- f10c.gps(subsetSTOP$f8_oily_fish_prepreg)
+subsetSTOP$f10c_fruit_1m_prepreg <- f10c.gps(subsetSTOP$f8_fruit_prepreg)
+subsetSTOP$f10c_leafy_vege_1m_prepreg <- f10c.gps(subsetSTOP$f8_leafy_vege_prepreg)
+
+# 1st-trim
+subsetSTOP$f10c_oily_fish_1st_vst <- f10c.gps(subsetSTOP$f8_oily_fish_1st_trim)
+subsetSTOP$f10c_fruit_1st_vst <- f10c.gps(subsetSTOP$f8_fruit_1st_trim)
+subsetSTOP$f10c_leafy_vege_1st_vst <- f10c.gps(subsetSTOP$f8_leafy_vege_1st_trim)
+```
+
+- Now convert to a frequency metric  
+
+```{r}
+# use the `fastfd.fix()` function to convert the catagorical variable to a fractional variable representing serves per day
+# prepreg
+subsetSTOP$oilyFishPrePreg <- fastfd.fix(subsetSTOP$f10c_oily_fish_1m_prepreg)
+subsetSTOP$fruitPrePreg <- fastfd.fix(subsetSTOP$f10c_fruit_1m_prepreg)
+subsetSTOP$leafyVegPrePreg <- fastfd.fix(subsetSTOP$f10c_leafy_vege_1m_prepreg)
+
+# 1st-trim
+subsetSTOP$oilyFish1stVisit <- fastfd.fix(subsetSTOP$f10c_oily_fish_1st_vst)
+subsetSTOP$fruit1stVisit <- fastfd.fix(subsetSTOP$f10c_fruit_1st_vst)
+subsetSTOP$leafyVeg1stVisit <- fastfd.fix(subsetSTOP$f10c_leafy_vege_1st_vst)
+
+# multiply by 7 to calculate the serves per week
+# prepreg
+subsetSTOP$oilyFishPrePregWK <- subsetSTOP$oilyFishPrePreg*7
+subsetSTOP$fruitPrePregWK <- subsetSTOP$fruitPrePreg*7
+subsetSTOP$leafyVegPrePregWK <- subsetSTOP$leafyVegPrePreg*7
+
+# 1st-trim
+subsetSTOP$oilyFish1stVisitWK <- subsetSTOP$oilyFish1stVisit*7
+subsetSTOP$fruit1stVisitWK <- subsetSTOP$fruit1stVisit*7
+subsetSTOP$leafyVeg1stVisitWK <- subsetSTOP$leafyVeg1stVisit*7
 
 ```
 
@@ -149,43 +418,224 @@ subsetSTOP %<>% dplyr::mutate(f9_hgt_cm = f9_hgt * 100)
 
 ```{r combine scope and stop}
 
-combinedMetaData <- data.frame(samplename = c(subsetSCOPE[,"samplename"], subsetSTOP[,"samplename"]),
+combinedfruitFishLeafyVeg <- data.frame(samplename = c(subsetSCOPE[,"samplename"], subsetSTOP[,"samplename"]),
                                cohort = c(rep("SCOPE", nrow(subsetSCOPE)), rep("STOP", nrow(subsetSTOP))),
-                               gestationDelivery = c(subsetSCOPE[,"f39c_final_del_gest"], subsetSTOP[,"f22_gestw_del"]),
-                               neonatalSex = c(subsetSCOPE[, "f26_Sex_MF"], subsetSTOP[, "f22_sex"]),
-                               neonatalBirthweight = c(subsetSCOPE[, "f26_Birthwgt"], subsetSTOP[, "f22_birthwgt"]),
-                               maternalWaist = c(subsetSCOPE[, "f11_waist"], subsetSTOP[, "f9_waist"]),
-                               maternalHip = c(subsetSCOPE[, "f11_hip"], subsetSTOP[, "f9_hip"]),
-                               maternalBMI = c(subsetSCOPE[, "f11_bmi"], subsetSTOP[, "f9_bmi"]),
-                               maternalWgt = c(subsetSCOPE[, "f11_wgt"], subsetSTOP[, "f9_wgt"]),
-                               maternalHgt = c(subsetSCOPE[, "f11_hgt"], subsetSTOP[, "f9_hgt_cm"]),
-                               maternalAge = c(subsetSCOPE[, "f1_age"], subsetSTOP[, "f1_age"]),
-                               maternalBurger_1st = c(subsetSCOPE[, "f10_burger_1st_vst"], subsetSTOP[, "f8_burgers_1st_trim"]),
-                               maternalBurger_prepreg = c(subsetSCOPE[, "f10_burger_1m_prepreg"], subsetSTOP[, "f8_burgers_prepreg"]),
-                               maternalCurry_1st = c(subsetSCOPE[, "f10_curry_1st_vst"], subsetSTOP[, "f8_curry_1st_trim"]),
-                               maternalCurry_prepreg = c(subsetSCOPE[, "f10_curry_1m_prepreg"], subsetSTOP[, "f8_curry_prepreg"]),
-                               maternalFriedChicken_1st = c(subsetSCOPE[, "f10_fried_chicken_1st_vst"], subsetSTOP[, "f8_chicken_1st_trim"]),
-                               maternalFriedChicken_prepreg = c(subsetSCOPE[, "f10_fried_chicken_1m_prepreg"], subsetSTOP[, "f8_chicken_prepreg"]),
-                               maternalFruit_1st = c(subsetSCOPE[, "f10_fruit_1st_vst"], subsetSTOP[, "f8_fruit_1st_trim"]),
-                               maternalFruit_prepreg = c(subsetSCOPE[, "f10_fruit_1m_prepreg"], subsetSTOP[, "f8_fruit_prepreg"]),
-                               materalLeafyVege_1st = c(subsetSCOPE[, "f10_leafy_vege_1st_vst"], subsetSTOP[, "f8_leafy_vege_1st_trim"]),
-                               maternalLeafyVeg_prepreg = c(subsetSCOPE[, "f10_leafy_vege_1m_prepreg"], subsetSTOP[, "f8_leafy_vege_prepreg"]),
-                               maternalChips_1st = c(subsetSCOPE[, "f10_chips_1st_vst"], subsetSTOP[, "f8_chips_1st_trim"]),
-                               maternalChips_prepreg = c(subsetSCOPE[, "f10_chips_1m_prepreg"], subsetSTOP[, "f8_chips_prepreg"]),
-                               maternalOilyFish_1st = c(subsetSCOPE[, "f10_oily_fish_1st_vst"], subsetSTOP[, "f8_oily_fish_1st_trim"]),
-                               maternalOilyFish_prepreg = c(subsetSCOPE[, "f10_oily_fish_1m_prepreg"], subsetSTOP[, "f8_oily_fish_prepreg"]),
-                               maternalOtherFish_1st = c(subsetSCOPE[, "f10_oth_fish_1st_vst"], subsetSTOP[, "f8_oth_fish_1st_trim"]),
-                               maternalOtherFish_prepreg = c(subsetSCOPE[, "f10_oth_fish_1m_prepreg"], subsetSTOP[, "f8_oth_fish_prepreg"]),
-                               maternalPizza_1st = c(subsetSCOPE[, "f10_pizza_1st_vst"], subsetSTOP[, "f8_pizza_1st_trim"]),
-                               maternalPizza_prepreg = c(subsetSCOPE[, "f10_pizza_1m_prepreg"], subsetSTOP[, "f8_pizza_prepreg"]))
+                               
+                               oilyFishPrePregWK = c(subsetSCOPE[,"oilyFishPrePregWK"], subsetSTOP[,"oilyFishPrePregWK"]),
+                               oilyFish1stVisitWK = c(subsetSCOPE[,"oilyFish1stVisitWK"], subsetSTOP[,"oilyFish1stVisitWK"]),
+                               fruitPrePregWK = c(subsetSCOPE[,"fruitPrePregWK"], subsetSTOP[,"fruitPrePregWK"]),
+                               fruit1stVisitWK = c(subsetSCOPE[,"fruit1stVisitWK"], subsetSTOP[,"fruit1stVisitWK"]),
+                               leafyVegPrePregWK = c(subsetSCOPE[,"leafyVegPrePregWK"], subsetSTOP[,"leafyVegPrePregWK"]),
+                               leafyVeg1stVisitWK = c(subsetSCOPE[,"leafyVeg1stVisitWK"], subsetSTOP[,"leafyVeg1stVisitWK"])
+                               )
+```
 
+# Combine the data frames
+
+```{r}
+# put the SCOPE and STOP information together
+finalTable <- dplyr::left_join(subset_SCOPE_STOP, combinedfruitFishLeafyVeg, by = "samplename")
+# Some of the columns have label attributes and I want to get rid of them for the summary tables to work
+# check which columns have label attributes
+sapply(finalTable, attr, "label")
+# remove labels where they exist
+finalTable_stripped <- finalTable %>%
+  mutate(across(everything(), ~{ attr(.x, "label") <- NULL; .x }))
+# check label attributes have been removed
+sapply(finalTable_stripped, attr, "label")
+
+# Convert all labelled variables to numeric
+for(col in names(finalTable_stripped)) {
+  if("labelled" %in% class(finalTable_stripped[[col]])) {
+    finalTable_stripped[[col]] <- as.numeric(finalTable_stripped[[col]])
+  }
+}
+
+# summarise male/female + complicated/uncomplicated
+tempTable <- finalTable_stripped %>%
+  mutate(uncomplicated = case_when(
+    Uncomplicated == 1 ~ "No",
+    Uncomplicated == 2 ~ "Yes",
+    TRUE ~ as.character(Uncomplicated)
+  ),
+  sex = case_when(
+    fetal_sex == 1 ~ "male",
+    fetal_sex == 2 ~ "female",
+    TRUE ~ as.character(fetal_sex)
+  )) %>%
+  dplyr::select(., samplename, uncomplicated, sex) %>%
+  dplyr::left_join(., SCOPE_STOP_combined_20240208[, c("samplename", "Outcome", "GDMn", "PEn", "PTBn", "SGAn", "Ethnicity")], by = "samplename")
+# cross tabulation of complication status and fetal sex
+table(tempTable$sex, tempTable$Outcome)
+
+library(purrr)
+
+# Mutate to create "finalOutcome"
+tempTable <- tempTable %>%
+  mutate(finalOutcome = pmap_chr(select(., GDMn, PEn, PTBn, SGAn), function(...) {
+    values <- c(...)   # Get column values
+    cols_with_yes <- names(values)[values == "Yes"]  # Get column names where value is "Yes"
+    
+    if (length(cols_with_yes) == 0) {
+      return("uncomplicated")  # If no "Yes", mark as "uncomplicated"
+    } else {
+      return(paste(cols_with_yes, collapse = ", "))  # Concatenate column names with ", "
+    }
+  }))
+
+# Print the result
+print(df)
+# cross tabulation of complication status and fetal sex
+table(tempTable$sex, tempTable$finalOutcome)
 
 ```
 
-# Add outcomes data
-- Go back to the metadata and add information regarding pregnancy outcomes.  
+## Generate quartile summary table
+
 ```{r}
 
-temp <- dplyr::filter(metadata_quality, samplename %in% c(SCOPE_plasma, STOP_plasma))
+# Quartile Summary Table
+quartile_summary <- finalTable_stripped %>%
+  summarise(
+    across(c(f1_age, BMI, SEI, GA_samp, Birthweight, Birthweight_centile, FastFd_PrePregWK, FastFd_1stVstWK, 
+             oilyFishPrePregWK, oilyFish1stVisitWK, fruitPrePregWK, fruit1stVisitWK, leafyVegPrePregWK, leafyVeg1stVisitWK),
+           list(
+             Min = ~min(.x, na.rm = TRUE),
+             Q1 = ~quantile(.x, 0.25, na.rm = TRUE),
+             Median = ~median(.x, na.rm = TRUE),
+             Q3 = ~quantile(.x, 0.75, na.rm = TRUE),
+             Max = ~max(.x, na.rm = TRUE),
+             Mean = ~mean(.x, na.rm = TRUE),
+             SD = ~sd(.x, na.rm = TRUE)
+           )
+    )
+  ) %>%
+  tidyr::pivot_longer(cols = everything(), 
+               names_to = c("Variable", "Statistic"), 
+               names_pattern = "(.+)_(Min|Q1|Median|Q3|Max|Mean|SD)", # Fix splitting
+               values_to = "Value") %>%
+  arrange(Variable, Statistic)
+
+print(quartile_summary)
+
+
+# Reshape the data to have variables as rows and statistics as columns
+publication_table <- quartile_summary %>%
+  pivot_wider(
+    names_from = Statistic,
+    values_from = Value
+  ) %>%
+  # Rearrange columns in a logical order
+  select(Variable, Min, Q1, Median, Mean, Q3, Max)
+
+# Create a publication-ready table
+publication_table %>%
+  kable(format = "html", 
+        caption = "Summary Statistics by Variable",
+        digits = 1) %>%  # Round to 1 decimal place
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE)  # Bold header row
+
+# Apply function to all numeric variables
+quartile_distribution <- lapply(names(finalTable_stripped), function(var) {
+  count_by_quartile(var, finalTable_stripped)
+}) %>% bind_rows()
+
+# View the results
+print(quartile_distribution)
+
+# Join with your original publication table
+publication_table_quartile_complete <- publication_table %>%
+  left_join(quartile_distribution %>% 
+              select(Variable, Q1_count, Q2_count, Q3_count, Q4_count, Total_observations),
+            by = "Variable")
+
+# Display the enhanced table
+publication_table_quartile_complete %>%
+  kable(format = "html", 
+        caption = "Summary Statistics and Quartile Distribution by Variable",
+        digits = 1) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+# To save the table
+
+write_xlsx(publication_table_quartile_complete, quartileTable_out_file)
+
 ```
 
+## Generate Tertile summary table
+
+```{r}
+
+# Tertile Summary Table
+tertile_summary <- finalTable_stripped %>%
+  summarise(
+    across(c(f1_age, BMI, SEI, GA_samp, Birthweight, Birthweight_centile, FastFd_PrePregWK, FastFd_1stVstWK, 
+             oilyFishPrePregWK, oilyFish1stVisitWK, fruitPrePregWK, fruit1stVisitWK, leafyVegPrePregWK, leafyVeg1stVisitWK),
+           list(
+             Min = ~min(.x, na.rm = TRUE),
+             T1 = ~quantile(.x, 1/3, na.rm = TRUE),  # 33rd percentile
+             Median = ~median(.x, na.rm = TRUE),     # 50th percentile
+             T2 = ~quantile(.x, 2/3, na.rm = TRUE),  # 66th percentile
+             Max = ~max(.x, na.rm = TRUE),
+             Mean = ~mean(.x, na.rm = TRUE),
+             SD = ~sd(.x, na.rm = TRUE)
+           )
+    )
+  ) %>%
+  pivot_longer(cols = everything(), 
+               names_to = c("Variable", "Statistic"), 
+               names_pattern = "(.+)_(Min|T1|Median|T2|Max|Mean|SD)", # Update names_pattern
+               values_to = "Value") %>%
+  arrange(Variable, Statistic)
+
+# Print the summary
+print(tertile_summary)
+
+# Reshape the data to have variables as rows and statistics as columns
+publication_table_tertile <- tertile_summary %>%
+  pivot_wider(
+    names_from = Statistic,
+    values_from = Value
+  ) %>%
+  # Rearrange columns in a logical order
+  select(Variable, Min, T1, Median, Mean, T2, Max)
+
+# Create a publication-ready table
+publication_table_tertile %>%
+  kable(format = "html", 
+        caption = "Summary Statistics by Variable",
+        digits = 1) %>%  # Round to 1 decimal place
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE)  # Bold header row
+
+# Apply function to all numeric variables
+tertile_distribution <- lapply(names(finalTable_stripped), function(var) {
+  count_by_tertile(var, finalTable_stripped)
+}) %>% bind_rows()
+
+# View the results
+print(tertile_distribution)
+
+# Join with your original publication table
+publication_table_tertile_complete <- publication_table_tertile %>%
+  left_join(tertile_distribution %>% 
+              select(Variable, T1_count, T2_count, T3_count, Total_observations),
+            by = "Variable")
+
+# Display the enhanced table
+publication_table_tertile_complete %>%
+  kable(format = "html", 
+        caption = "Summary Statistics and Tertile Distribution by Variable",
+        digits = 1) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+# To save the table
+library(writexl)
+write_xlsx(publication_table_tertile_complete, tertileTable_out_file)
+
+```
